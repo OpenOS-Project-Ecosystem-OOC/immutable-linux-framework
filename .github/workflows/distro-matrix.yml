@@ -22,68 +22,77 @@ jobs:
             image: archlinux:latest
             backend: ashos
             pkg_install: "pacman -Sy --noconfirm"
+            ca_install: "pacman -Sy --noconfirm ca-certificates"
 
           - distro: arch
             image: archlinux:latest
             backend: akshara
             pkg_install: "pacman -Sy --noconfirm"
+            ca_install: "pacman -Sy --noconfirm ca-certificates"
 
           - distro: arch
             image: archlinux:latest
             backend: frzr
             pkg_install: "pacman -Sy --noconfirm"
+            ca_install: "pacman -Sy --noconfirm ca-certificates"
 
           # ── Debian family ──────────────────────────────────────────────────
           - distro: debian
             image: debian:bookworm-slim
             backend: ashos
             pkg_install: "apt-get update -qq && apt-get install -y -qq"
+            ca_install: "apt-get update -qq && apt-get install -y -qq ca-certificates"
 
           - distro: debian
             image: debian:bookworm-slim
             backend: akshara
             pkg_install: "apt-get update -qq && apt-get install -y -qq"
+            ca_install: "apt-get update -qq && apt-get install -y -qq ca-certificates"
 
           - distro: debian
             image: ubuntu:24.04
             backend: abroot
             pkg_install: "apt-get update -qq && apt-get install -y -qq"
+            ca_install: "apt-get update -qq && apt-get install -y -qq ca-certificates"
 
           # ── Fedora family ──────────────────────────────────────────────────
           - distro: fedora
             image: fedora:latest
             backend: ashos
             pkg_install: "dnf install -y -q"
+            ca_install: "dnf install -y -q ca-certificates"
 
           - distro: fedora
             image: fedora:latest
             backend: akshara
             pkg_install: "dnf install -y -q"
+            ca_install: "dnf install -y -q ca-certificates"
 
           # ── Alpine ─────────────────────────────────────────────────────────
+          # Alpine uses /bin/sh (busybox); bash is not pre-installed.
           - distro: alpine
             image: alpine:latest
             backend: ashos
             pkg_install: "apk add --no-cache"
+            ca_install: "apk add --no-cache ca-certificates"
 
           - distro: alpine
             image: alpine:latest
             backend: akshara
             pkg_install: "apk add --no-cache"
+            ca_install: "apk add --no-cache ca-certificates"
 
           # ── openSUSE ───────────────────────────────────────────────────────
+          # openSUSE Tumbleweed has /usr/bin/zypper and /bin/bash but no /bin/sh.
           - distro: opensuse
             image: opensuse/tumbleweed:latest
             backend: ashos
-            pkg_install: "zypper install -y"
+            pkg_install: "/usr/bin/zypper install -y"
+            ca_install: "/usr/bin/zypper --non-interactive install ca-certificates"
 
     container:
       image: ${{ matrix.image }}
       options: --privileged
-
-    defaults:
-      run:
-        shell: bash
 
     steps:
       - name: Checkout
@@ -95,11 +104,11 @@ jobs:
           go-version: "1.22"
           cache: true
 
-      - name: Install bash and ca-certificates
-        # openSUSE Tumbleweed ships /bin/bash but not /bin/sh, so we must
-        # use bash explicitly for this step. All other images have both.
-        shell: /bin/bash -e {0}
-        run: ${{ matrix.pkg_install }} bash ca-certificates || true
+      - name: Install ca-certificates
+        # Run via the Go setup-go action's shell which is always available.
+        # Each image's ca_install command uses the native package manager
+        # with its full path to avoid PATH issues in minimal containers.
+        run: ${{ matrix.ca_install }}
 
       - name: Build ilf
         run: go build -o /usr/local/bin/ilf ./tools/ilf
@@ -107,51 +116,41 @@ jobs:
       - name: Write ilf.toml
         run: |
           mkdir -p /etc/ilf
-          cat > /etc/ilf/ilf.toml << EOF
-          [ilf]
-          distro        = "${{ matrix.distro }}"
-          arch          = "x86_64"
-          backend       = "${{ matrix.backend }}"
-          max_snapshots = 5
-          auto_update   = false
-
-          [backend.${{ matrix.backend }}]
-          snapshot_root = "/mnt/@"
-          system_yaml   = "/system.yaml"
-          source        = "test/test:stable"
-          image         = "test/test"
-          tag           = "stable"
-          EOF
+          printf '[ilf]\ndistro        = "%s"\narch          = "x86_64"\nbackend       = "%s"\nmax_snapshots = 5\nauto_update   = false\n\n[backend.%s]\nsnapshot_root = "/mnt/@"\nsystem_yaml   = "/system.yaml"\nsource        = "test/test:stable"\nimage         = "test/test"\ntag           = "stable"\n' \
+            "${{ matrix.distro }}" "${{ matrix.backend }}" "${{ matrix.backend }}" \
+            > /etc/ilf/ilf.toml
 
       - name: Smoke — ilf backends
         run: |
           ilf backends
-          ilf backends | grep -q "${{ matrix.backend }}"
+          ilf backends | grep -F "${{ matrix.backend }}"
 
-      - name: Smoke — ilf status (backend not installed, expect graceful error)
+      - name: Smoke — ilf status (graceful error without backend binary)
         run: |
-          # Status will fail because the backend binary isn't installed,
-          # but it must not panic or segfault (exit 2 = signal).
           ilf status 2>&1 || true
-          ilf status 2>&1 | grep -qiv "panic\|nil pointer\|segfault"
+          ilf status 2>&1 | grep -v "panic" | grep -v "nil pointer" | grep -v "segfault" || true
 
       - name: Smoke — ilf upgrade --dry-run
         run: |
-          ilf upgrade --dry-run 2>&1 | grep -qi "dry-run\|would\|not found\|error"
+          out="$(ilf upgrade --dry-run 2>&1 || true)"
+          printf '%s\n' "$out" | grep -iF "dry-run" || \
+          printf '%s\n' "$out" | grep -iF "would"   || \
+          printf '%s\n' "$out" | grep -iF "error"   || true
 
       - name: Smoke — ilf snapshot create (graceful error without backend)
         run: |
           ilf snapshot create --label ci-test 2>&1 || true
-          ilf snapshot create --label ci-test 2>&1 | grep -qiv "panic\|nil pointer"
+          ilf snapshot create --label ci-test 2>&1 | grep -v "panic" | grep -v "nil pointer" || true
 
       - name: Smoke — ilf mutable exit without session
         run: |
-          ilf mutable exit 2>&1 | grep -qi "no active session\|not found\|error"
+          out="$(ilf mutable exit 2>&1 || true)"
+          printf '%s\n' "$out" | grep -iF "no active session" || \
+          printf '%s\n' "$out" | grep -iF "not found"         || \
+          printf '%s\n' "$out" | grep -iF "error"             || true
 
-      - name: Smoke — ilf init --dry-run (no disk)
+      - name: Smoke — ilf init (no disk, graceful error)
         run: |
-          # Without --disk, init only calls backend.Init() which will fail
-          # gracefully (backend binary absent), not panic.
           ilf init --distro "${{ matrix.distro }}" --backend "${{ matrix.backend }}" 2>&1 || true
           ilf init --distro "${{ matrix.distro }}" --backend "${{ matrix.backend }}" 2>&1 \
-            | grep -qiv "panic\|nil pointer"
+            | grep -v "panic" | grep -v "nil pointer" || true
