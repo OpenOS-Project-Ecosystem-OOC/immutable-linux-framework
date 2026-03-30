@@ -83,12 +83,14 @@ jobs:
             ca_install: "apk add --no-cache ca-certificates"
 
           # ── openSUSE ───────────────────────────────────────────────────────
-          # openSUSE Tumbleweed has /bin/bash but no /bin/sh symlink.
+          # Use opensuse/leap (stable) — it ships /bin/sh.
+          # opensuse/tumbleweed has no /bin/sh, which breaks the Actions
+          # runner that always invokes run: steps via `sh -c`.
           - distro: opensuse
-            image: opensuse/tumbleweed:latest
+            image: opensuse/leap:latest
             backend: ashos
-            pkg_install: "/usr/bin/zypper install -y"
-            ca_install: "/usr/bin/zypper --non-interactive install ca-certificates"
+            pkg_install: "zypper install -y"
+            ca_install: "zypper --non-interactive install ca-certificates"
 
     container:
       image: ${{ matrix.image }}
@@ -105,16 +107,7 @@ jobs:
           cache: true
 
       - name: Install ca-certificates
-        # openSUSE Tumbleweed has /bin/bash but no /bin/sh.
-        # All other images have /bin/sh. We use an env var + exec trick:
-        # the runner always has /usr/bin/env; we pick the first available shell.
-        run: |
-          for sh in /bin/sh /bin/bash /usr/bin/bash; do
-            if [ -x "$sh" ]; then exec "$sh" -c "$CA_INSTALL"; fi
-          done
-          echo "No shell found" >&2; exit 1
-        env:
-          CA_INSTALL: ${{ matrix.ca_install }}
+        run: ${{ matrix.ca_install }}
 
       - name: Build ilf
         run: go build -o /usr/local/bin/ilf ./tools/ilf
