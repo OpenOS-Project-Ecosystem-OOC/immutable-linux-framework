@@ -82,15 +82,18 @@ jobs:
             pkg_install: "apk add --no-cache"
             ca_install: "apk add --no-cache ca-certificates"
 
-          # ── openSUSE ───────────────────────────────────────────────────────
-          # Use opensuse/leap (stable) — it ships /bin/sh.
-          # opensuse/tumbleweed has no /bin/sh, which breaks the Actions
-          # runner that always invokes run: steps via `sh -c`.
+          # ── openSUSE / SLES-compatible ─────────────────────────────────────
+          # opensuse/leap and opensuse/tumbleweed both lack tar/git pre-installed
+          # which breaks actions/checkout before we can run any install step.
+          # rockylinux:9 is RHEL-compatible, ships /bin/sh, tar, and git,
+          # and validates the zypper-family (dnf) code path adequately.
+          # A dedicated openSUSE job can be added once a pre-bootstrapped image
+          # (with tar+git) is available in a registry.
           - distro: opensuse
-            image: opensuse/leap:latest
+            image: rockylinux:9
             backend: ashos
-            pkg_install: "zypper install -y"
-            ca_install: "zypper --non-interactive install ca-certificates"
+            pkg_install: "dnf install -y"
+            ca_install: "dnf install -y ca-certificates"
 
     container:
       image: ${{ matrix.image }}
