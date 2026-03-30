@@ -99,7 +99,10 @@ func Exit() error {
 		for _, d := range []string{merged,
 			t.root + "/.ilf-overlay-work",
 			t.root + "/.ilf-overlay-upper"} {
-			os.RemoveAll(d)
+			// Non-fatal: log but continue cleanup on removal errors.
+			if rerr := os.RemoveAll(d); rerr != nil {
+				fmt.Fprintf(os.Stderr, "mutable exit: cleanup %s: %v\n", d, rerr)
+			}
 		}
 		return nil
 	case MethodBind:
@@ -117,7 +120,7 @@ func (t *Toggle) IsMutable() bool {
 		return false
 	}
 	f.Close()
-	os.Remove(f.Name())
+	_ = os.Remove(f.Name()) // best-effort probe cleanup; error is irrelevant
 	return true
 }
 
