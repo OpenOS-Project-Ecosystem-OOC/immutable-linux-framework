@@ -41,17 +41,71 @@ func New(root string, method Method) *Toggle {
 }
 
 // Enter makes root temporarily writable.
-// Returns a restore function that must be called to re-apply immutability.
+// Writes a lock file to lockPath so that Exit() can restore immutability
+// even from a separate process invocation.
+// Returns a restore function for in-process use; callers that span processes
+// should use the package-level Exit() instead.
 func (t *Toggle) Enter() (restore func() error, err error) {
+	if LockExists() {
+		return nil, fmt.Errorf("mutable: session already active (run 'ilf mutable exit' first)")
+	}
+
+	var fn func() error
 	switch t.method {
 	case MethodChattr:
-		return t.enterChattr()
+		fn, err = t.enterChattr()
 	case MethodOverlayFS:
-		return t.enterOverlay()
+		fn, err = t.enterOverlay()
 	case MethodBind:
-		return t.enterBind()
+		fn, err = t.enterBind()
 	default:
 		return nil, fmt.Errorf("mutable: unknown method %d", t.method)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := writeLock(t.root, t.method); err != nil {
+		// Best-effort: restore immediately if we can't persist the lock.
+		_ = fn()
+		return nil, err
+	}
+
+	return func() error {
+		defer clearLock()
+		return fn()
+	}, nil
+}
+
+// Exit reads the active lock file and restores immutability.
+// This is the cross-process counterpart to the restore closure returned by Enter().
+func Exit() error {
+	lf, err := readLock()
+	if err != nil {
+		return err
+	}
+	t := New(lf.Root, Method(lf.Method))
+	defer clearLock()
+
+	switch Method(lf.Method) {
+	case MethodChattr:
+		return chattr(t.root, true)
+	case MethodOverlayFS:
+		// Unmount the overlay merged directory.
+		merged := t.root + "/.ilf-overlay-merged"
+		if err := remount(merged, ""); err != nil {
+			return fmt.Errorf("mutable exit (overlay umount): %w", err)
+		}
+		for _, d := range []string{merged,
+			t.root + "/.ilf-overlay-work",
+			t.root + "/.ilf-overlay-upper"} {
+			os.RemoveAll(d)
+		}
+		return nil
+	case MethodBind:
+		return remount(t.root, "ro")
+	default:
+		return fmt.Errorf("mutable exit: unknown method %d in lock file", lf.Method)
 	}
 }
 
