@@ -23,21 +23,18 @@ jobs:
             backend: ashos
             pkg_install: "pacman -Sy --noconfirm"
             ca_install: "pacman -Sy --noconfirm ca-certificates"
-            ca_shell: "sh -e {0}"
 
           - distro: arch
             image: archlinux:latest
             backend: akshara
             pkg_install: "pacman -Sy --noconfirm"
             ca_install: "pacman -Sy --noconfirm ca-certificates"
-            ca_shell: "sh -e {0}"
 
           - distro: arch
             image: archlinux:latest
             backend: frzr
             pkg_install: "pacman -Sy --noconfirm"
             ca_install: "pacman -Sy --noconfirm ca-certificates"
-            ca_shell: "sh -e {0}"
 
           # ── Debian family ──────────────────────────────────────────────────
           - distro: debian
@@ -45,21 +42,18 @@ jobs:
             backend: ashos
             pkg_install: "apt-get update -qq && apt-get install -y -qq"
             ca_install: "apt-get update -qq && apt-get install -y -qq ca-certificates"
-            ca_shell: "sh -e {0}"
 
           - distro: debian
             image: debian:bookworm-slim
             backend: akshara
             pkg_install: "apt-get update -qq && apt-get install -y -qq"
             ca_install: "apt-get update -qq && apt-get install -y -qq ca-certificates"
-            ca_shell: "sh -e {0}"
 
           - distro: debian
             image: ubuntu:24.04
             backend: abroot
             pkg_install: "apt-get update -qq && apt-get install -y -qq"
             ca_install: "apt-get update -qq && apt-get install -y -qq ca-certificates"
-            ca_shell: "sh -e {0}"
 
           # ── Fedora family ──────────────────────────────────────────────────
           - distro: fedora
@@ -67,14 +61,12 @@ jobs:
             backend: ashos
             pkg_install: "dnf install -y -q"
             ca_install: "dnf install -y -q ca-certificates"
-            ca_shell: "sh -e {0}"
 
           - distro: fedora
             image: fedora:latest
             backend: akshara
             pkg_install: "dnf install -y -q"
             ca_install: "dnf install -y -q ca-certificates"
-            ca_shell: "sh -e {0}"
 
           # ── Alpine ─────────────────────────────────────────────────────────
           # Alpine uses /bin/sh (busybox); bash is not pre-installed.
@@ -83,24 +75,20 @@ jobs:
             backend: ashos
             pkg_install: "apk add --no-cache"
             ca_install: "apk add --no-cache ca-certificates"
-            ca_shell: "sh -e {0}"
 
           - distro: alpine
             image: alpine:latest
             backend: akshara
             pkg_install: "apk add --no-cache"
             ca_install: "apk add --no-cache ca-certificates"
-            ca_shell: "sh -e {0}"
 
           # ── openSUSE ───────────────────────────────────────────────────────
           # openSUSE Tumbleweed has /bin/bash but no /bin/sh symlink.
-          # shell: /bin/bash -e {0} is set on the ca_install step only.
           - distro: opensuse
             image: opensuse/tumbleweed:latest
             backend: ashos
             pkg_install: "/usr/bin/zypper install -y"
             ca_install: "/usr/bin/zypper --non-interactive install ca-certificates"
-            ca_shell: "/bin/bash -e {0}"
 
     container:
       image: ${{ matrix.image }}
@@ -117,10 +105,16 @@ jobs:
           cache: true
 
       - name: Install ca-certificates
-        # Use the per-image shell: openSUSE needs /bin/bash (no /bin/sh);
-        # all others use sh. The ca_shell matrix field controls this.
-        shell: ${{ matrix.ca_shell }}
-        run: ${{ matrix.ca_install }}
+        # openSUSE Tumbleweed has /bin/bash but no /bin/sh.
+        # All other images have /bin/sh. We use an env var + exec trick:
+        # the runner always has /usr/bin/env; we pick the first available shell.
+        run: |
+          for sh in /bin/sh /bin/bash /usr/bin/bash; do
+            if [ -x "$sh" ]; then exec "$sh" -c "$CA_INSTALL"; fi
+          done
+          echo "No shell found" >&2; exit 1
+        env:
+          CA_INSTALL: ${{ matrix.ca_install }}
 
       - name: Build ilf
         run: go build -o /usr/local/bin/ilf ./tools/ilf
