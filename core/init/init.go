@@ -136,7 +136,7 @@ func Run(layout DiskLayout, mountRoot string) error {
 
 // ── Partitioning ──────────────────────────────────────────────────────────────
 
-func partition(disk string, efi bool, parts []Partition) error {
+func partition(disk string, _ bool, parts []Partition) error {
 	// Wipe existing partition table.
 	if err := run("sgdisk", "--zap-all", disk); err != nil {
 		return err
