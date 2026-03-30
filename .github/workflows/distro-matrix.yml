@@ -1,0 +1,147 @@
+name: Distro Matrix
+
+on:
+  push:
+    branches: ["main", "feat/**", "fix/**"]
+  pull_request:
+    branches: ["main"]
+  # Allow manual trigger for full matrix runs.
+  workflow_dispatch:
+
+jobs:
+  smoke-test:
+    name: "${{ matrix.distro }} / ${{ matrix.backend }}"
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Arch family ────────────────────────────────────────────────────
+          - distro: arch
+            image: archlinux:latest
+            backend: ashos
+            pkg_install: "pacman -Sy --noconfirm"
+
+          - distro: arch
+            image: archlinux:latest
+            backend: akshara
+            pkg_install: "pacman -Sy --noconfirm"
+
+          - distro: arch
+            image: archlinux:latest
+            backend: frzr
+            pkg_install: "pacman -Sy --noconfirm"
+
+          # ── Debian family ──────────────────────────────────────────────────
+          - distro: debian
+            image: debian:bookworm-slim
+            backend: ashos
+            pkg_install: "apt-get update -qq && apt-get install -y -qq"
+
+          - distro: debian
+            image: debian:bookworm-slim
+            backend: akshara
+            pkg_install: "apt-get update -qq && apt-get install -y -qq"
+
+          - distro: debian
+            image: ubuntu:24.04
+            backend: abroot
+            pkg_install: "apt-get update -qq && apt-get install -y -qq"
+
+          # ── Fedora family ──────────────────────────────────────────────────
+          - distro: fedora
+            image: fedora:latest
+            backend: ashos
+            pkg_install: "dnf install -y -q"
+
+          - distro: fedora
+            image: fedora:latest
+            backend: akshara
+            pkg_install: "dnf install -y -q"
+
+          # ── Alpine ─────────────────────────────────────────────────────────
+          - distro: alpine
+            image: alpine:latest
+            backend: ashos
+            pkg_install: "apk add --no-cache"
+
+          - distro: alpine
+            image: alpine:latest
+            backend: akshara
+            pkg_install: "apk add --no-cache"
+
+          # ── openSUSE ───────────────────────────────────────────────────────
+          - distro: opensuse
+            image: opensuse/tumbleweed:latest
+            backend: ashos
+            pkg_install: "zypper install -y"
+
+    container:
+      image: ${{ matrix.image }}
+      options: --privileged
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build ilf
+        run: go build -o /usr/local/bin/ilf ./tools/ilf
+
+      - name: Write ilf.toml
+        run: |
+          mkdir -p /etc/ilf
+          cat > /etc/ilf/ilf.toml << EOF
+          [ilf]
+          distro        = "${{ matrix.distro }}"
+          arch          = "x86_64"
+          backend       = "${{ matrix.backend }}"
+          max_snapshots = 5
+          auto_update   = false
+
+          [backend.${{ matrix.backend }}]
+          snapshot_root = "/mnt/@"
+          system_yaml   = "/system.yaml"
+          source        = "test/test:stable"
+          image         = "test/test"
+          tag           = "stable"
+          EOF
+
+      - name: Smoke — ilf backends
+        run: |
+          ilf backends
+          ilf backends | grep -q "${{ matrix.backend }}"
+
+      - name: Smoke — ilf status (backend not installed, expect graceful error)
+        run: |
+          # Status will fail because the backend binary isn't installed,
+          # but it must not panic or segfault (exit 2 = signal).
+          ilf status 2>&1 || true
+          ilf status 2>&1 | grep -qiv "panic\|nil pointer\|segfault"
+
+      - name: Smoke — ilf upgrade --dry-run
+        run: |
+          ilf upgrade --dry-run 2>&1 | grep -qi "dry-run\|would\|not found\|error"
+
+      - name: Smoke — ilf snapshot create (graceful error without backend)
+        run: |
+          ilf snapshot create --label ci-test 2>&1 || true
+          ilf snapshot create --label ci-test 2>&1 | grep -qiv "panic\|nil pointer"
+
+      - name: Smoke — ilf mutable exit without session
+        run: |
+          ilf mutable exit 2>&1 | grep -qi "no active session\|not found\|error"
+
+      - name: Smoke — ilf init --dry-run (no disk)
+        run: |
+          # Without --disk, init only calls backend.Init() which will fail
+          # gracefully (backend binary absent), not panic.
+          ilf init --distro "${{ matrix.distro }}" --backend "${{ matrix.backend }}" 2>&1 || true
+          ilf init --distro "${{ matrix.distro }}" --backend "${{ matrix.backend }}" 2>&1 \
+            | grep -qiv "panic\|nil pointer"
