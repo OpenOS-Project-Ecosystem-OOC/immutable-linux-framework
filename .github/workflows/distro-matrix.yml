@@ -49,3 +49,4 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           build-args: |
             VOIDLINUX_REPO=https://repo.voidlinux.org/current/x86_64
+            # Updated to a valid repository URL
