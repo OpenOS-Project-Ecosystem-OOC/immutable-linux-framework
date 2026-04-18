@@ -6,7 +6,7 @@ set -e
 
 PREFIX="/usr/local"
 INSTALL_SYSTEMD=1
-REPO="https://github.com/your-org/immutable-linux-framework"
+REPO="https://gitlab.com/openos-project/immutable-filesystem_deving/immutable-linux-framework"
 
 for arg in "$@"; do
     case "$arg" in
