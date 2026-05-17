@@ -6,21 +6,13 @@ run:
 linters:
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
     - unused
-    - gofmt
-    - goimports
     - misspell
     - unconvert
     - unparam
-  settings:
-    goimports:
-      local-prefixes: github.com/ilf
-
-issues:
   exclusions:
     rules:
       # adapter.go files shell out to external binaries; unused function warnings
@@ -30,3 +22,12 @@ issues:
       # Test helpers intentionally use _ assignments.
       - path: "tests/"
         linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/ilf
