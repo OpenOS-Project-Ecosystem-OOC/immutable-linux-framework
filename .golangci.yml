@@ -22,6 +22,9 @@ linters:
       # Test helpers intentionally use _ assignments.
       - path: "tests/"
         linters: [errcheck]
+      # mutable.go: f.Close and os.RemoveAll are best-effort probe/cleanup calls.
+      - path: "core/mutable/mutable.go"
+        linters: [errcheck]
 
 formatters:
   enable:
